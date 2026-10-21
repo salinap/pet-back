@@ -2,7 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../../entities/user.entity';
 import type { UserResponse } from '../../entities/user.entity';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { HashService } from '../hash/hash.service';
 
 @Injectable()
@@ -31,7 +31,15 @@ export class UsersService {
     }
     const passwordHash = await this.hashService.hash(password);
     const user = this.usersRepository.create({ email, passwordHash });
-    const result = await this.usersRepository.save(user);
+    let result: User;
+    try {
+      result = await this.usersRepository.save(user);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw new ConflictException('Email already exists');
+      }
+      throw error;
+    }
     return {
       id: result.id,
       email: result.email,
@@ -39,5 +47,12 @@ export class UsersService {
       isEmailVerified: result.isEmailVerified,
       createdAt: result.createdAt,
     };
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      error instanceof QueryFailedError &&
+      (error.driverError as { code?: string }).code === '23505'
+    );
   }
 }

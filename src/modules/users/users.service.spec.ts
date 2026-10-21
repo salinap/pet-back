@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { QueryFailedError } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { UserRole } from './user-role.enum';
 import { HashService } from '../hash/hash.service';
@@ -96,6 +97,31 @@ describe('UsersService', () => {
       ).rejects.toThrow(ConflictException);
       expect(hashService.hash).not.toHaveBeenCalled();
       expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException if the database rejects a duplicate email', async () => {
+      hashService.hash.mockResolvedValue('hashed-value');
+      repository.create.mockReturnValue({});
+      const driverError = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+      });
+      repository.save.mockRejectedValue(
+        new QueryFailedError('INSERT', [], driverError),
+      );
+
+      await expect(
+        service.create('user@example.com', 'secret123'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should rethrow unexpected database errors', async () => {
+      hashService.hash.mockResolvedValue('hashed-value');
+      repository.create.mockReturnValue({});
+      repository.save.mockRejectedValue(new Error('connection lost'));
+
+      await expect(
+        service.create('user@example.com', 'secret123'),
+      ).rejects.toThrow('connection lost');
     });
   });
 });
