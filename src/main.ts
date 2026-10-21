@@ -5,4 +5,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   await app.listen(process.env.PORT ?? 4000);
 }
-bootstrap();
+bootstrap().catch((error: unknown) => {
+  console.error('Failed to start application', error);
+  process.exitCode = 1;
+});
