@@ -4,7 +4,7 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
 } from 'typeorm';
-import { UserRole } from '../users/user-role.enum';
+import { UserRole } from '../modules/users/user-role.enum';
 
 @Entity('users') // Название таблицы в базе данных
 export class User {
@@ -26,3 +26,5 @@ export class User {
   @CreateDateColumn()
   createdAt!: Date;
 }
+
+export type UserResponse = Omit<User, 'passwordHash'>;
