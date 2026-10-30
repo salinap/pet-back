@@ -1,5 +1,11 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import {
+  IsByteLength,
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class LoginDto {
   @Transform(({ value }: { value: unknown }) =>
@@ -11,5 +17,8 @@ export class LoginDto {
 
   @IsString({ message: 'Пароль должен быть строкой' })
   @IsNotEmpty({ message: 'Пароль обязателен' })
+  @IsByteLength(0, 72, {
+    message: 'Пароль не должен превышать 72 байта UTF-8',
+  })
   password!: string;
 }

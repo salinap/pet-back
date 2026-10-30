@@ -5,6 +5,7 @@ import {
   MinLength,
   MaxLength,
   IsNotEmpty,
+  IsByteLength,
 } from 'class-validator';
 
 export class CreateUserDto {
@@ -19,6 +20,8 @@ export class CreateUserDto {
   @IsString({ message: 'Пароль должен быть строкой' })
   @IsNotEmpty({ message: 'Пароль обязателен' })
   @MinLength(8, { message: 'Пароль должен быть не менее 8 символов' })
-  @MaxLength(255, { message: 'Пароль слишком длинный' })
+  @IsByteLength(0, 72, {
+    message: 'Пароль не должен превышать 72 байта UTF-8',
+  })
   password!: string;
 }
