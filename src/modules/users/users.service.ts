@@ -21,6 +21,22 @@ export class UsersService {
     return this.usersRepository.findOneBy({ id });
   }
 
+  async findCredentialsByEmail(email: string): Promise<User | null> {
+    const user = await this.usersRepository.findOne({
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        role: true,
+        isEmailVerified: true,
+        createdAt: true,
+      },
+      where: { email },
+    });
+
+    return user;
+  }
+
   async create(email: string, password: string): Promise<UserResponse> {
     const existingUser = await this.usersRepository.findOne({
       where: { email },
