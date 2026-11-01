@@ -40,6 +40,27 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(65535)
   PORT: number = 4000;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^[a-fA-F0-9]{64}$/)
+  JWT_SECRET!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/\S/)
+  JWT_ISSUER!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/\S/)
+  JWT_AUDIENCE!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(900)
+  JWT_ACCESS_TTL_SECONDS!: string;
 }
 
 export function validate(

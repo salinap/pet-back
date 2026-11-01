@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import type { UserResponse } from '../../entities/user.entity';
 import { HashService } from '../hash/hash.service';
 import { UsersService } from '../users/users.service';
@@ -8,6 +8,7 @@ const DUMMY_PASSWORD_HASH =
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   constructor(
     private readonly userService: UsersService,
     private readonly hashService: HashService,
@@ -22,8 +23,19 @@ export class AuthService {
       hashToCompare,
     );
     if (!user || !isPasswordMatching) {
+      this.logger.warn({
+        event: 'auth.login',
+        outcome: 'failure',
+        reason: 'invalid_credentials',
+      });
       throw new UnauthorizedException('Неверный email или пароль');
     }
+
+    this.logger.log({
+      event: 'auth.login',
+      outcome: 'success',
+      userId: user.id,
+    });
 
     return {
       id: user.id,
