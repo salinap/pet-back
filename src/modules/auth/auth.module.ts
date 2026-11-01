@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { PassportModule } from '@nestjs/passport';
+import { JwtStrategy } from './strategies/jwt.strategy';
 
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
@@ -18,6 +20,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
         blockDuration: 60_000,
       },
     ]),
+    PassportModule.register({ session: false }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -39,6 +42,6 @@ import { ThrottlerModule } from '@nestjs/throttler';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, HashService],
+  providers: [AuthService, HashService, JwtStrategy],
 })
 export class AuthModule {}

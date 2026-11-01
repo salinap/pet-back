@@ -60,7 +60,7 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   @Max(900)
-  JWT_ACCESS_TTL_SECONDS!: string;
+  JWT_ACCESS_TTL_SECONDS!: number;
 }
 
 export function validate(
