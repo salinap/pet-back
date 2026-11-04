@@ -1,0 +1,16 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pet_test
+      POSTGRES_PASSWORD: pet_test_password
+      POSTGRES_DB: pet_test
+    ports:
+      - "127.0.0.1:5434:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pet_test", "-d", "pet_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15

@@ -11,14 +11,15 @@ import {
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { AuthGuard } from '@nestjs/passport';
 import type { AuthenticatedRequest } from './types/authenticated-request';
+import { Public } from './decorators/public.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(ThrottlerGuard)
   login(@Body() dto: LoginDto) {
@@ -26,7 +27,6 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(AuthGuard('jwt'))
   me(@Req() request: AuthenticatedRequest) {
     return this.authService.getProfile(request.user.userId);
   }
