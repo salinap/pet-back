@@ -15,6 +15,7 @@ import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/user-role.enum';
 import { UsersController } from '../users/users.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 import type { AuthenticatedRequest } from './types/authenticated-request';
 import { configureApp } from '../../configure-app';
 
@@ -38,6 +39,7 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
   const secret = Buffer.alloc(32, 1);
   const users = {
     findById: jest.fn(),
+    findAll: jest.fn(),
     findCredentialsByEmail: jest.fn(),
     create: jest.fn(),
   };
@@ -48,12 +50,14 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
     role: UserRole.USER,
     isEmailVerified: false,
     createdAt: new Date('2026-11-01T00:00:00.000Z'),
+    displayName: null,
     passwordHash: 'must-never-be-returned',
   };
 
   // A fresh app also isolates the real throttler storage between tests.
   beforeEach(async () => {
     users.findById.mockReset().mockResolvedValue(user);
+    users.findAll.mockReset().mockResolvedValue([]);
     users.findCredentialsByEmail.mockReset().mockResolvedValue(user);
     users.create.mockReset().mockResolvedValue({ id: user.id });
     hashes.compare.mockReset().mockResolvedValue(true);
@@ -82,6 +86,7 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
         AuthService,
         JwtStrategy,
         { provide: APP_GUARD, useClass: JwtAuthGuard },
+        { provide: APP_GUARD, useClass: RolesGuard },
         { provide: UsersService, useValue: users },
         { provide: HashService, useValue: hashes },
         {
@@ -214,6 +219,7 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
       role: UserRole.USER,
       isEmailVerified: user.isEmailVerified,
       createdAt: user.createdAt.toISOString(),
+      displayName: user.displayName,
     });
     expect(users.findById).toHaveBeenCalledWith(7);
     expect(users.findById).toHaveBeenCalledTimes(1);

@@ -69,6 +69,7 @@ describe('UsersService', () => {
         role: UserRole.USER,
         isEmailVerified: false,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        displayName: null,
         passwordHash: 'hashed-value',
       });
 
@@ -85,12 +86,16 @@ describe('UsersService', () => {
         role: UserRole.USER,
         isEmailVerified: false,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        displayName: null,
       });
       expect(result).not.toHaveProperty('passwordHash');
     });
 
     it('should throw ConflictException if the email is already taken', async () => {
-      repository.findOne.mockResolvedValue({ id: 1, email: 'user@example.com' });
+      repository.findOne.mockResolvedValue({
+        id: 1,
+        email: 'user@example.com',
+      });
 
       await expect(
         service.create('user@example.com', 'secret123'),
@@ -122,6 +127,46 @@ describe('UsersService', () => {
       await expect(
         service.create('user@example.com', 'secret123'),
       ).rejects.toThrow('connection lost');
+    });
+  });
+
+  describe('user responses', () => {
+    const user = {
+      id: 1,
+      email: 'user@example.com',
+      role: UserRole.USER,
+      isEmailVerified: true,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      displayName: 'Test User',
+      passwordHash: 'must-not-be-returned',
+    };
+
+    it('maps every user in the list to the safe response shape', async () => {
+      repository.find.mockResolvedValue([user]);
+
+      await expect(service.findAll()).resolves.toEqual([
+        {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified,
+          createdAt: user.createdAt,
+          displayName: user.displayName,
+        },
+      ]);
+    });
+
+    it('maps an individual user to the safe response shape', async () => {
+      repository.findOneBy.mockResolvedValue(user);
+
+      await expect(service.findById(user.id)).resolves.toEqual({
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: user.isEmailVerified,
+        createdAt: user.createdAt,
+        displayName: user.displayName,
+      });
     });
   });
 });

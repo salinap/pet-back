@@ -34,6 +34,7 @@ describe('AuthService', () => {
     role: UserRole.USER,
     isEmailVerified: false,
     createdAt: new Date('2026-10-30T04:56:19.145Z'),
+    displayName: null,
   };
 
   beforeEach(async () => {
@@ -74,6 +75,7 @@ describe('AuthService', () => {
       role: user.role,
       isEmailVerified: user.isEmailVerified,
       createdAt: user.createdAt,
+      displayName: user.displayName,
     });
     expect(usersService.findById).toHaveBeenCalledWith(user.id);
   });

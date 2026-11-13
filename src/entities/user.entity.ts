@@ -20,6 +20,9 @@ export class User {
   @Column({ type: 'varchar', length: 255, select: false })
   passwordHash!: string;
 
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  displayName!: string | null;
+
   @Column({ default: false })
   isEmailVerified!: boolean;
 

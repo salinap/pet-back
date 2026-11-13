@@ -4,6 +4,7 @@ import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UserResponse } from '../../entities/user.entity';
+import { toUserResponse } from '../users/user.mapper';
 
 const DUMMY_PASSWORD_HASH =
   '$2b$10$D/b28TkYUJH/jqBU7b9VvuhI7tExaIukEEwV51RY/pBdNf6JGgpf2';
@@ -25,13 +26,7 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    return {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      isEmailVerified: user.isEmailVerified,
-      createdAt: user.createdAt,
-    };
+    return toUserResponse(user);
   }
 
   async login(

@@ -140,12 +140,14 @@ describe('register → login → me (e2e, real PostgreSQL)', () => {
       role: string;
       isEmailVerified: boolean;
       createdAt: string;
+      displayName: string | null;
     };
     expect(profile).toEqual({
       id: expect.any(Number) as unknown,
       email,
       role: 'USER',
       isEmailVerified: false,
+      displayName: null,
       createdAt: expect.any(String) as unknown,
     });
     const { rows } = await database.query<{ id: number; passwordHash: string }>(
