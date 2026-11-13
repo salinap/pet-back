@@ -22,7 +22,7 @@ process.on('SIGTERM', () => void stop());
 process.on('disconnect', () => void stop());
 
 async function start() {
-  // Check before importing AppModule: it enables schema synchronization.
+  // Validate the test environment before importing configuration or running migrations.
   for (const [key, value] of Object.entries(expected)) {
     if (process.env[key] !== value) {
       throw new Error(`Unsafe e2e configuration: ${key}`);
@@ -46,6 +46,15 @@ async function start() {
     }
   } finally {
     await client.end();
+  }
+  const dataSource = require('../dist/database/data-source.js').default;
+  try {
+    await dataSource.initialize();
+    await dataSource.runMigrations();
+  } finally {
+    if (dataSource.isInitialized) {
+      await dataSource.destroy();
+    }
   }
   const { AppModule } = require('../dist/app.module.js');
   const { configureApp } = require('../dist/configure-app.js');

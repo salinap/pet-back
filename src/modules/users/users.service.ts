@@ -18,7 +18,7 @@ export class UsersService {
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     private readonly hashService: HashService,
-  ) { }
+  ) {}
 
   async findAll(): Promise<UserResponse[]> {
     const users = await this.usersRepository.find();

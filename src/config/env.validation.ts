@@ -7,9 +7,10 @@ import {
   Min,
 } from 'class-validator';
 import { plainToInstance, Type } from 'class-transformer';
+import type { ClassConstructor } from 'class-transformer';
 import { validateSync } from 'class-validator';
 
-export class EnvironmentVariables {
+export class DatabaseEnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   @Matches(/\S/)
@@ -34,7 +35,9 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(65535)
   DB_PORT: number = 5433;
+}
 
+export class EnvironmentVariables extends DatabaseEnvironmentVariables {
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -63,10 +66,11 @@ export class EnvironmentVariables {
   JWT_ACCESS_TTL_SECONDS!: number;
 }
 
-export function validate(
+function validateConfig<T extends object>(
+  configClass: ClassConstructor<T>,
   config: Record<string, unknown>,
-): EnvironmentVariables {
-  const validatedConfig = plainToInstance(EnvironmentVariables, config);
+): T {
+  const validatedConfig = plainToInstance(configClass, config);
 
   const errors = validateSync(validatedConfig, {
     skipMissingProperties: false,
@@ -83,4 +87,16 @@ export function validate(
   }
 
   return validatedConfig;
+}
+
+export function validate(
+  config: Record<string, unknown>,
+): EnvironmentVariables {
+  return validateConfig(EnvironmentVariables, config);
+}
+
+export function validateDatabase(
+  config: Record<string, unknown>,
+): DatabaseEnvironmentVariables {
+  return validateConfig(DatabaseEnvironmentVariables, config);
 }
