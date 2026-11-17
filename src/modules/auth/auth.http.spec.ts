@@ -5,6 +5,9 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { IsNull } from 'typeorm';
+import { AuthSession } from '../../entities/authSession.entity';
 import { ThrottlerModule } from '@nestjs/throttler';
 import request from 'supertest';
 import { AuthController } from './auth.controller';
@@ -24,7 +27,7 @@ import { configureApp } from '../../configure-app';
 class GuardProbeController {
   @Get()
   get(@Req() request: AuthenticatedRequest) {
-    return { userId: request.user.userId };
+    return request.user;
   }
 }
 
@@ -44,6 +47,8 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
     create: jest.fn(),
   };
   const hashes = { compare: jest.fn() };
+  const sessions = { save: jest.fn(), findOneBy: jest.fn(), update: jest.fn() };
+  const sessionId = '26b9e2cc-a2ef-4df1-92a8-374954b1348b';
   const user = {
     id: 7,
     email: 'test@example.com',
@@ -61,6 +66,14 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
     users.findCredentialsByEmail.mockReset().mockResolvedValue(user);
     users.create.mockReset().mockResolvedValue({ id: user.id });
     hashes.compare.mockReset().mockResolvedValue(true);
+    sessions.save.mockReset().mockResolvedValue({ id: sessionId });
+    sessions.update.mockReset().mockResolvedValue({ affected: 1 });
+    sessions.findOneBy.mockReset().mockResolvedValue({
+      id: sessionId,
+      userId: user.id,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      revokedAt: null,
+    });
     const values = {
       JWT_SECRET: secret.toString('hex'),
       JWT_ISSUER: 'pet-backend',
@@ -84,6 +97,7 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
       controllers: [AuthController, UsersController, GuardProbeController],
       providers: [
         AuthService,
+        { provide: getRepositoryToken(AuthSession), useValue: sessions },
         JwtStrategy,
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
@@ -122,11 +136,68 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
       const body = response.body as { expiresIn: number; accessToken: string };
 
       expect(body.expiresIn).toBe(900);
-      expect(jwt.verify(body.accessToken)).toMatchObject({ sub: '7' });
+      expect(jwt.verify(body.accessToken)).toMatchObject({
+        sub: '7',
+        sid: sessionId,
+      });
       expect(hashes.compare).toHaveBeenCalledWith(
         'correct-password',
         user.passwordHash,
       );
+    },
+  );
+
+  it('logs out using the verified context and ignores IDs supplied in the body', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${jwt.sign({ sub: '7', sid: sessionId })}`)
+      .send({ userId: 8, sessionId: '00000000-0000-4000-8000-000000000008' })
+      .expect(204);
+    expect(response.text).toBe('');
+    expect(sessions.update).toHaveBeenCalledTimes(1);
+    expect(sessions.update).toHaveBeenCalledWith(
+      { id: sessionId, userId: 7, revokedAt: IsNull() },
+      { revokedAt: expect.any(Date) as unknown },
+    );
+  });
+
+  it.each([undefined, 'Bearer invalid'])(
+    'rejects logout without valid authentication: %s',
+    async (header) => {
+      const attempt = request(app.getHttpServer()).post('/auth/logout');
+      if (header !== undefined) attempt.set('Authorization', header);
+      await attempt.expect(401);
+      expect(sessions.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['missing', null],
+    ['revoked', { revokedAt: new Date() }],
+    ['expired', { expiresAt: new Date(0) }],
+    ['foreign', { userId: 8 }],
+  ])(
+    'rejects logout for a %s session without updating it',
+    async (_name, patch) => {
+      sessions.findOneBy.mockResolvedValue(
+        patch === null
+          ? null
+          : {
+              id: sessionId,
+              userId: user.id,
+              expiresAt: new Date(Date.now() + 86_400_000),
+              revokedAt: null,
+              ...patch,
+            },
+      );
+      await request(app.getHttpServer())
+        .post('/auth/logout')
+        .set(
+          'Authorization',
+          `Bearer ${jwt.sign({ sub: '7', sid: sessionId })}`,
+        )
+        .expect(401);
+      expect(sessions.update).not.toHaveBeenCalled();
     },
   );
 
@@ -201,13 +272,13 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
   it('passes the verified user to a separate controller without auth decorators', async () => {
     await request(app.getHttpServer())
       .get('/guard-probe')
-      .set('Authorization', `Bearer ${jwt.sign({ sub: '7' })}`)
+      .set('Authorization', `Bearer ${jwt.sign({ sid: sessionId, sub: '7' })}`)
       .expect(200)
-      .expect({ userId: 7 });
+      .expect({ userId: 7, sessionId });
   });
 
   it('uses the verified subject to load and return only the current safe profile', async () => {
-    const token = jwt.sign({ sub: '7', role: 'ADMIN' });
+    const token = jwt.sign({ sid: sessionId, sub: '7', role: 'ADMIN' });
     const response = await request(app.getHttpServer())
       .get('/auth/me')
       .set('Authorization', `Bearer ${token}`)
@@ -222,16 +293,85 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
       displayName: user.displayName,
     });
     expect(users.findById).toHaveBeenCalledWith(7);
-    expect(users.findById).toHaveBeenCalledTimes(1);
+    expect(users.findById).toHaveBeenCalledTimes(2);
+    expect(sessions.findOneBy).toHaveBeenCalledWith({ id: sessionId });
+  });
+
+  it.each([
+    undefined,
+    null,
+    7,
+    '',
+    'not-a-uuid',
+    '00000000-0000-1000-8000-000000000007',
+  ])(
+    'rejects missing or invalid sid before database access: %s',
+    async (sid) => {
+      await request(app.getHttpServer())
+        .get('/guard-probe')
+        .set('Authorization', `Bearer ${jwt.sign({ sub: '7', sid })}`)
+        .expect(401);
+      expect(sessions.findOneBy).not.toHaveBeenCalled();
+      expect(users.findById).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['missing', null],
+    ['foreign', { userId: 8 }],
+    ['revoked', { revokedAt: new Date() }],
+    ['expired', { expiresAt: new Date(0) }],
+  ])('rejects a %s session before loading the user', async (_name, patch) => {
+    sessions.findOneBy.mockResolvedValue(
+      patch === null
+        ? null
+        : {
+            id: sessionId,
+            userId: user.id,
+            expiresAt: new Date(Date.now() + 86_400_000),
+            revokedAt: null,
+            ...patch,
+          },
+    );
+    await request(app.getHttpServer())
+      .get('/guard-probe')
+      .set('Authorization', `Bearer ${jwt.sign({ sub: '7', sid: sessionId })}`)
+      .expect(401);
+    expect(sessions.findOneBy).toHaveBeenCalledWith({ id: sessionId });
+    expect(users.findById).not.toHaveBeenCalled();
+  });
+
+  it('rejects a session expiring exactly now', async () => {
+    const now = Date.now();
+    const dateNow = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      sessions.findOneBy.mockResolvedValue({
+        id: sessionId,
+        userId: user.id,
+        expiresAt: new Date(now),
+        revokedAt: null,
+      });
+      await request(app.getHttpServer())
+        .get('/guard-probe')
+        .set(
+          'Authorization',
+          `Bearer ${jwt.sign({ sub: '7', sid: sessionId })}`,
+        )
+        .expect(401);
+      expect(users.findById).not.toHaveBeenCalled();
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it('returns 401 when the token is valid but the user no longer exists', async () => {
     users.findById.mockResolvedValue(null);
     await request(app.getHttpServer())
       .get('/auth/me')
-      .set('Authorization', `Bearer ${jwt.sign({ sub: '7' })}`)
+      .set('Authorization', `Bearer ${jwt.sign({ sid: sessionId, sub: '7' })}`)
       .expect(401)
       .expect({ message: 'Unauthorized', statusCode: 401 });
+    expect(users.findById).toHaveBeenCalledTimes(1);
   });
 
   it.each([undefined, '', 'Basic abc', 'Bearer', 'Bearer invalid'])(
@@ -243,6 +383,7 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
         .expect(401)
         .expect({ message: 'Unauthorized', statusCode: 401 });
       expect(users.findById).not.toHaveBeenCalled();
+      expect(sessions.findOneBy).not.toHaveBeenCalled();
     },
   );
 
@@ -256,10 +397,14 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
   ])('rejects %s', async (_name, options) => {
     await request(app.getHttpServer())
       .get('/auth/me')
-      .set('Authorization', `Bearer ${jwt.sign({ sub: '7' }, options)}`)
+      .set(
+        'Authorization',
+        `Bearer ${jwt.sign({ sid: sessionId, sub: '7' }, options)}`,
+      )
       .expect(401)
       .expect({ message: 'Unauthorized', statusCode: 401 });
     expect(users.findById).not.toHaveBeenCalled();
+    expect(sessions.findOneBy).not.toHaveBeenCalled();
   });
 
   it.each([undefined, 7, '0', '-1', 'abc', '07', '9007199254740992'])(
@@ -267,16 +412,18 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
     async (sub) => {
       await request(app.getHttpServer())
         .get('/auth/me')
-        .set('Authorization', `Bearer ${jwt.sign({ sub })}`)
+        .set('Authorization', `Bearer ${jwt.sign({ sid: sessionId, sub })}`)
         .expect(401)
         .expect({ message: 'Unauthorized', statusCode: 401 });
       expect(users.findById).not.toHaveBeenCalled();
+      expect(sessions.findOneBy).not.toHaveBeenCalled();
     },
   );
 
   it('requires exp even for an otherwise valid signed token', async () => {
     const token = new JwtService({ secret }).sign({
       sub: '7',
+      sid: sessionId,
       iss: 'pet-backend',
       aud: 'pet-api',
     });
@@ -286,14 +433,15 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
       .expect(401)
       .expect({ message: 'Unauthorized', statusCode: 401 });
     expect(users.findById).not.toHaveBeenCalled();
+    expect(sessions.findOneBy).not.toHaveBeenCalled();
   });
 
   it.each(['tampered', 'unsigned'])('rejects a %s token', async (kind) => {
-    const parts = jwt.sign({ sub: '7' }).split('.');
+    const parts = jwt.sign({ sid: sessionId, sub: '7' }).split('.');
     if (kind === 'tampered') {
-      parts[1] = Buffer.from(JSON.stringify({ sub: '8' })).toString(
-        'base64url',
-      );
+      parts[1] = Buffer.from(
+        JSON.stringify({ sub: '8', sid: sessionId }),
+      ).toString('base64url');
     } else {
       parts[0] = Buffer.from(
         JSON.stringify({ alg: 'none', typ: 'JWT' }),
@@ -306,5 +454,6 @@ describe('Global JWT authentication (HTTP, real Passport/JWT, mocked database)',
       .expect(401)
       .expect({ message: 'Unauthorized', statusCode: 401 });
     expect(users.findById).not.toHaveBeenCalled();
+    expect(sessions.findOneBy).not.toHaveBeenCalled();
   });
 });

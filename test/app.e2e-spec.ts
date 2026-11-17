@@ -179,6 +179,142 @@ describe('register → login → me (e2e, real PostgreSQL)', () => {
       .expect(401);
   });
 
+  it('creates independent sessions and enforces their owner, revocation, expiry and existence', async () => {
+    const email = newEmail();
+    const registration = await request(url)
+      .post('/users')
+      .send({ email, password })
+      .expect(201);
+    const userId = (registration.body as { id: number }).id;
+    const before = Date.now();
+    const sessionIds: string[] = [];
+    const tokens: string[] = [];
+
+    for (let i = 0; i < 2; i++) {
+      const login = await request(url)
+        .post('/auth/login')
+        .send({ email, password })
+        .expect(200);
+      const { accessToken } = login.body as { accessToken: string };
+      tokens.push(accessToken);
+      // Decode only to correlate the claim with the database record.
+      const payload = JSON.parse(
+        Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'),
+      ) as { sub: string; sid: string };
+      expect(payload.sub).toBe(String(userId));
+      expect(payload.sid).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      sessionIds.push(payload.sid);
+      await request(url)
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+    }
+    const after = Date.now();
+    expect(sessionIds[0]).not.toBe(sessionIds[1]);
+
+    await request(url)
+      .post('/auth/login')
+      .send({ email, password: 'wrong-password' })
+      .expect(401);
+
+    const { rows } = await database.query<{
+      id: string;
+      userId: number;
+      createdAt: Date;
+      expiresAt: Date;
+      revokedAt: Date | null;
+    }>('SELECT * FROM auth_sessions WHERE "userId" = $1', [userId]);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((session) => session.id).sort()).toEqual(
+      [...sessionIds].sort(),
+    );
+    for (const session of rows) {
+      expect(session.userId).toBe(userId);
+      expect(session.revokedAt).toBeNull();
+      expect(session.createdAt).toBeInstanceOf(Date);
+      const day = 24 * 60 * 60 * 1000;
+      expect(session.expiresAt.getTime()).toBeGreaterThanOrEqual(before + day);
+      expect(session.expiresAt.getTime()).toBeLessThanOrEqual(after + day);
+    }
+
+    const me = (index: number, status: number) =>
+      request(url)
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${tokens[index]}`)
+        .expect(status);
+
+    // Use the original JWTs throughout: only server-side state changes.
+    const logout = await request(url)
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .send({ userId: userId + 1, sessionId: sessionIds[1] })
+      .expect(204);
+    expect(logout.text).toBe('');
+    const revoked = await database.query<{ revokedAt: Date }>(
+      'SELECT "revokedAt" FROM auth_sessions WHERE id = $1',
+      [sessionIds[0]],
+    );
+    expect(revoked.rows[0].revokedAt).toBeInstanceOf(Date);
+    await me(0, 401);
+    await me(1, 200);
+    await request(url)
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .expect(401);
+    const repeated = await database.query<{ revokedAt: Date }>(
+      'SELECT "revokedAt" FROM auth_sessions WHERE id = $1',
+      [sessionIds[0]],
+    );
+    expect(repeated.rows[0].revokedAt).toEqual(revoked.rows[0].revokedAt);
+    const other = await database.query<{ revokedAt: Date | null }>(
+      'SELECT "revokedAt" FROM auth_sessions WHERE id = $1',
+      [sessionIds[1]],
+    );
+    expect(other.rows[0].revokedAt).toBeNull();
+
+    await database.query('DELETE FROM auth_sessions WHERE id = $1', [
+      sessionIds[0],
+    ]);
+    await me(0, 401);
+
+    const foreignEmail = newEmail();
+    const foreign = await request(url)
+      .post('/users')
+      .send({ email: foreignEmail, password })
+      .expect(201);
+    await database.query(
+      'UPDATE auth_sessions SET "userId" = $1 WHERE id = $2',
+      [(foreign.body as { id: number }).id, sessionIds[1]],
+    );
+    await me(1, 401);
+
+    await database.query(
+      'UPDATE auth_sessions SET "userId" = $1 WHERE id = $2',
+      [userId, sessionIds[1]],
+    );
+    await me(1, 200);
+    await database.query(
+      'UPDATE auth_sessions SET "expiresAt" = now() - interval \'1 second\' WHERE id = $1',
+      [sessionIds[1]],
+    );
+    await me(1, 401);
+
+    await database.query(
+      'UPDATE auth_sessions SET "expiresAt" = now() + interval \'1 day\' WHERE id = $1',
+      [sessionIds[1]],
+    );
+    await me(1, 200);
+    await database.query('DELETE FROM users WHERE id = $1', [userId]);
+    const remaining = await database.query(
+      'SELECT id FROM auth_sessions WHERE "userId" = $1',
+      [userId],
+    );
+    expect(remaining.rows).toHaveLength(0);
+    await me(1, 401);
+  });
+
   it('rejects duplicate registration with a real database', async () => {
     const email = newEmail();
     await request(url).post('/users').send({ email, password }).expect(201);

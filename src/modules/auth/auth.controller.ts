@@ -18,6 +18,12 @@ import { Public } from './decorators/public.decorator';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  logout(@Req() request: AuthenticatedRequest) {
+    return this.authService.logout(request.user.userId, request.user.sessionId);
+  }
+
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)

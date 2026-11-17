@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import request from 'supertest';
 import { User } from '../../entities/user.entity';
+import { AuthSession } from '../../entities/authSession.entity';
 import { configureApp } from '../../configure-app';
 import { HashService } from '../hash/hash.service';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
@@ -42,8 +43,13 @@ describe('User authorization (HTTP, real guards/service, mocked repository)', ()
     };
   }
 
+  const sessions = { findOneBy: jest.fn() };
+  function sessionId(id: number) {
+    return `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`;
+  }
+
   function token(id: number) {
-    return `Bearer ${jwt.sign({ sub: String(id) })}`;
+    return `Bearer ${jwt.sign({ sub: String(id), sid: sessionId(id) })}`;
   }
 
   beforeEach(async () => {
@@ -62,6 +68,21 @@ describe('User authorization (HTTP, real guards/service, mocked repository)', ()
         },
       ]),
     );
+    sessions.findOneBy
+      .mockReset()
+      .mockImplementation(({ id }: { id: string }) => {
+        const userId = [7, 8, 9].find((userId) => sessionId(userId) === id);
+        return Promise.resolve(
+          userId === undefined
+            ? null
+            : {
+                id,
+                userId,
+                expiresAt: new Date(Date.now() + 86_400_000),
+                revokedAt: null,
+              },
+        );
+      });
     repository.find
       .mockReset()
       .mockImplementation(() => Promise.resolve([...records.values()]));
@@ -103,6 +124,7 @@ describe('User authorization (HTTP, real guards/service, mocked repository)', ()
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: getRepositoryToken(User), useValue: repository },
+        { provide: getRepositoryToken(AuthSession), useValue: sessions },
         { provide: HashService, useValue: {} },
         {
           provide: ConfigService,
@@ -136,7 +158,10 @@ describe('User authorization (HTTP, real guards/service, mocked repository)', ()
   it('denies USER the list even when JWT claims ADMIN', async () => {
     await request(app.getHttpServer())
       .get('/users')
-      .set('Authorization', `Bearer ${jwt.sign({ sub: '7', role: 'ADMIN' })}`)
+      .set(
+        'Authorization',
+        `Bearer ${jwt.sign({ sub: '7', sid: sessionId(7), role: 'ADMIN' })}`,
+      )
       .expect(403);
     expect(repository.find).not.toHaveBeenCalled();
   });
@@ -191,7 +216,7 @@ describe('User authorization (HTTP, real guards/service, mocked repository)', ()
           error: 'Not Found',
           statusCode: 404,
         });
-      expect(repository.findOneBy).toHaveBeenCalledTimes(1);
+      expect(repository.findOneBy).toHaveBeenCalledTimes(2);
       expect(repository.findOneBy).toHaveBeenCalledWith({ id: 7 });
     }
   });
@@ -297,7 +322,8 @@ describe('User authorization (HTTP, real guards/service, mocked repository)', ()
         .set('Authorization', token(7))
         .send({ displayName: 'Changed' })
         .expect(400);
-      expect(repository.findOneBy).not.toHaveBeenCalled();
+      expect(repository.findOneBy).toHaveBeenCalledTimes(1);
+      expect(repository.findOneBy).toHaveBeenCalledWith({ id: 7 });
       expect(repository.update).not.toHaveBeenCalled();
     },
   );

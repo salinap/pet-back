@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { DataSourceOptions } from 'typeorm';
 import { User } from '../entities/user.entity';
+import { AuthSession } from '../entities/authSession.entity';
 import type { DatabaseEnvironmentVariables } from './env.validation';
 
 export function createDatabaseOptions(
@@ -13,7 +14,7 @@ export function createDatabaseOptions(
     username: config.DB_USER,
     password: config.DB_PASSWORD,
     database: config.DB_NAME,
-    entities: [User],
+    entities: [User, AuthSession],
     migrations: [join(__dirname, '../database/migrations/*{.ts,.js}')],
     synchronize: false,
   };

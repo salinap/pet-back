@@ -12,6 +12,8 @@ import { HashService } from '../hash/hash.service';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthSession } from '../../entities/authSession.entity';
 
 @Module({
   imports: [
@@ -23,6 +25,7 @@ import { RolesGuard } from './guards/roles.guard';
         blockDuration: 60_000,
       },
     ]),
+    TypeOrmModule.forFeature([AuthSession]),
     PassportModule.register({ session: false }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
